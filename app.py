@@ -13,82 +13,118 @@ st.set_page_config(page_title="NeuroVault AI", layout="wide")
 st.markdown("""
 <style>
 
-/* GLOBAL */
-body {
-    background: radial-gradient(circle at top, #0f172a, #020617);
-    color: white;
+/* -------- GLOBAL -------- */
+html, body {
+    background: radial-gradient(circle at 20% 0%, #0f172a, #020617);
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
 .block-container {
+    max-width: 1100px;
+    margin: auto;
     padding-top: 2rem;
 }
 
-/* SIDEBAR */
+/* -------- SIDEBAR -------- */
 section[data-testid="stSidebar"] {
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(20px);
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(25px);
     border-right: 1px solid rgba(255,255,255,0.05);
 }
 
-/* HEADER */
+/* -------- HEADER -------- */
 .brand {
     text-align: center;
     margin-bottom: 25px;
 }
+
 .brand h1 {
-    font-size: 44px;
-    font-weight: 700;
+    font-size: 54px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(90deg, #38bdf8, #6366f1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
+
 .brand p {
     color: #94a3b8;
+    font-size: 15px;
 }
 
-/* CHAT WRAPPER */
-.chat-container {
-    max-width: 900px;
-    margin: auto;
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(18px);
+/* -------- BADGE -------- */
+.badge {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* -------- MAIN CARD -------- */
+.card {
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(25px);
+    border-radius: 22px;
+    padding: 28px;
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow:
+        0 10px 40px rgba(0,0,0,0.8),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+/* -------- UPLOADER -------- */
+[data-testid="stFileUploader"] {
+    border: 1px dashed rgba(255,255,255,0.15);
     border-radius: 18px;
-    padding: 20px;
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: 0 0 40px rgba(0,0,0,0.6);
+    padding: 18px;
+    background: rgba(255,255,255,0.02);
 }
 
-/* MESSAGES */
-.user-msg {
-    background: linear-gradient(135deg, #2563eb, #1e40af);
-    padding: 12px 16px;
-    border-radius: 16px;
-    margin: 10px 0;
-    text-align: right;
-}
-.bot-msg {
-    background: rgba(30, 41, 59, 0.6);
-    padding: 14px 18px;
-    border-radius: 16px;
-    margin: 10px 0;
-    border: 1px solid rgba(255,255,255,0.05);
-}
-
-/* INPUT */
+/* -------- INPUT -------- */
 .stTextInput input {
     border-radius: 999px;
-    padding: 14px;
-    background: rgba(15,23,42,0.6);
+    padding: 16px;
+    font-size: 15px;
+    background: rgba(15,23,42,0.7);
     border: 1px solid rgba(255,255,255,0.08);
+    transition: 0.3s;
 }
 
-/* UPLOADER */
-[data-testid="stFileUploader"] {
-    border: 1px dashed rgba(255,255,255,0.1);
-    border-radius: 14px;
-    padding: 15px;
+.stTextInput input:focus {
+    border: 1px solid #6366f1;
+    box-shadow: 0 0 15px rgba(99,102,241,0.4);
 }
 
-/* FOOTER */
+/* -------- BUTTON -------- */
+button[kind="primary"] {
+    border-radius: 999px !important;
+    background: linear-gradient(135deg, #6366f1, #2563eb);
+    border: none;
+    font-weight: 600;
+    box-shadow: 0 4px 20px rgba(99,102,241,0.4);
+}
+
+/* -------- CHAT -------- */
+.user-msg {
+    background: linear-gradient(135deg, #2563eb, #1e40af);
+    padding: 14px 18px;
+    border-radius: 18px;
+    margin: 12px 0;
+    text-align: right;
+    box-shadow: 0 6px 20px rgba(37,99,235,0.3);
+}
+
+.bot-msg {
+    background: rgba(30, 41, 59, 0.7);
+    padding: 16px 20px;
+    border-radius: 18px;
+    margin: 12px 0;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+/* -------- FOOTER -------- */
 .footer {
     text-align: center;
-    margin-top: 40px;
+    margin-top: 50px;
     color: #64748b;
     font-size: 13px;
 }
@@ -101,6 +137,15 @@ st.markdown("""
 <div class='brand'>
     <h1>🧠 NeuroVault AI</h1>
     <p>Private AI workspace for deep document intelligence</p>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class='badge'>
+    <span style='padding:6px 14px; border-radius:999px;
+    background:rgba(99,102,241,0.2); color:#a5b4fc; font-size:12px;'>
+    ⚡ AI + Vector Search Engine
+    </span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -126,7 +171,7 @@ client = OpenAI(api_key=api_key) if api_key else None
 # ---------------- MODEL ----------------
 @st.cache_resource
 def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    return SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
 model = load_model()
 
@@ -144,7 +189,10 @@ def chunk_text(text, size=200):
     words = text.split()
     return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
 
-# ---------------- UPLOAD ----------------
+# ---------------- MAIN CARD ----------------
+st.markdown("<div class='card'>", unsafe_allow_html=True)
+
+# Upload
 files = st.file_uploader("📄 Upload PDFs", type="pdf", accept_multiple_files=True)
 
 if files and "index" not in st.session_state:
@@ -168,11 +216,12 @@ if files and "index" not in st.session_state:
 
     st.success("✅ Documents ready")
 
-# ---------------- CHAT ----------------
+# Chat input
+query = st.text_input("", placeholder="Ask anything about your documents...")
+
+# Chat logic
 if "history" not in st.session_state:
     st.session_state.history = []
-
-query = st.text_input("💬 Ask your documents...")
 
 if query and "index" in st.session_state:
     q_vec = model.encode([query])
@@ -215,9 +264,7 @@ if query and "index" in st.session_state:
         "ctx": ctx_chunks
     })
 
-# ---------------- DISPLAY ----------------
-st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
-
+# Display chat
 for item in reversed(st.session_state.history):
     st.markdown(f"<div class='user-msg'>{item['q']}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='bot-msg'>{item['a']}</div>", unsafe_allow_html=True)
@@ -227,7 +274,7 @@ for item in reversed(st.session_state.history):
             st.write(txt[:500] + "...")
         st.caption("📄 " + ", ".join(item["src"]))
 
-    st.download_button("⬇️ Download", item["a"], file_name="answer.txt")
+    st.download_button("⬇️ Download Answer", item["a"], file_name="answer.txt")
 
 st.markdown("</div>", unsafe_allow_html=True)
 
