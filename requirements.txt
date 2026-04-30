@@ -5,3 +5,5 @@ PyPDF2
 openai
 numpy
 faiss-cpu
+torch
+torchvision
