@@ -7,56 +7,29 @@ from sentence_transformers import SentenceTransformer
 import faiss
 from groq import Groq
 
-# ---------------- MIC SAFE ----------------
-try:
-    from streamlit_mic_recorder import mic_recorder
-    mic_enabled = True
-except:
-    mic_enabled = False
-
+# ---------------- CONFIG ----------------
 st.set_page_config(page_title="NeuroVault AI", layout="wide")
+api_key = st.secrets["GROQ_API_KEY"]
 
 # ---------------- SESSION ----------------
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())[:8]
-
 if "chats" not in st.session_state:
-    st.session_state.chats = {"New Chat": []}
+    st.session_state.chats = {"Chat 1": []}
 
 if "current_chat" not in st.session_state:
-    st.session_state.current_chat = "New Chat"
+    st.session_state.current_chat = "Chat 1"
 
-if "run" not in st.session_state:
-    st.session_state.run = False
+if "index" not in st.session_state:
+    st.session_state.index = None
+    st.session_state.chunks = []
 
-if "query" not in st.session_state:
-    st.session_state.query = ""
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
 
-# ---------------- THEME ----------------
-dark = st.sidebar.toggle("🌗 Dark mode", value=True)
-
-bg = "#020617" if dark else "#f8fafc"
-text = "#e2e8f0" if dark else "#111"
-bot_bg = "rgba(30,41,59,0.9)" if dark else "#ffffff"
-user_bg = "#2563eb" if dark else "#3b82f6"
-
-# THEME REFRESH
-if "prev_theme" not in st.session_state:
-    st.session_state.prev_theme = dark
-
-if st.session_state.prev_theme != dark:
-    st.session_state.prev_theme = dark
-    st.rerun()
+if "processing" not in st.session_state:
+    st.session_state.processing = False
 
 # ---------------- SIDEBAR ----------------
-st.sidebar.markdown("### 💬 Conversations")
-
-if st.sidebar.button("🔄 Refresh App"):
-    st.rerun()
-
-if st.sidebar.button("🧹 Clear Chat"):
-    st.session_state.chats[st.session_state.current_chat] = []
-    st.rerun()
+st.sidebar.title("💬 Chats")
 
 for name in st.session_state.chats:
     if st.sidebar.button(name):
@@ -66,58 +39,21 @@ if st.sidebar.button("➕ New Chat"):
     new = f"Chat {len(st.session_state.chats)+1}"
     st.session_state.chats[new] = []
     st.session_state.current_chat = new
+    st.rerun()
 
-# 🔑 GROQ KEY
-api_key = st.sidebar.text_input("🔑 Groq API Key", type="password")
+st.sidebar.markdown("---")
 
-mode = st.sidebar.selectbox("Answer style", ["Concise", "Detailed", "Bullet"])
+mode = st.sidebar.selectbox("Answer Style", ["Concise", "Detailed", "Bullet"])
 
-# ---------------- UI ----------------
-st.markdown(f"""
-<style>
-[data-testid="stAppViewContainer"] {{
-    background-color: {bg} !important;
-    color: {text} !important;
-}}
-[data-testid="stSidebar"] {{
-    background-color: {"#020617" if dark else "#ffffff"} !important;
-}}
-.title {{
-    font-size: 56px;
-    font-weight: 900;
-    text-align: center;
-    background: linear-gradient(90deg,#38bdf8,#6366f1,#a855f7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}}
-.creator {{
-    text-align: center;
-    letter-spacing: 4px;
-    background: linear-gradient(90deg,#22d3ee,#a855f7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}}
-.user-msg {{
-    background: {user_bg};
-    padding: 14px;
-    border-radius: 16px;
-    text-align: right;
-    margin: 10px 0;
-    color: white;
-}}
-.bot-msg {{
-    background: {bot_bg};
-    padding: 16px;
-    border-radius: 16px;
-    margin: 10px 0;
-}}
-</style>
-""", unsafe_allow_html=True)
+if st.sidebar.button("🧹 Clear Chat"):
+    st.session_state.chats[st.session_state.current_chat] = []
+    st.rerun()
 
-st.markdown("""
-<div class='title'>NeuroVault AI</div>
-<div class='creator'>✦ ANISHA CHOWDHURY ✦</div>
-""", unsafe_allow_html=True)
+# ---------------- TITLE ----------------
+st.markdown("<h1 style='text-align:center;'>NeuroVault AI</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>✦ ANISHA CHOWDHURY ✦</p>", unsafe_allow_html=True)
+
+st.markdown("💡 Ask anything OR upload PDFs")
 
 # ---------------- MODEL ----------------
 @st.cache_resource
@@ -127,41 +63,36 @@ def load_model():
 model = load_model()
 
 # ---------------- GROQ ----------------
-def ask_groq(prompt):
-    if not api_key:
-        return "⚠️ Enter Groq API Key in sidebar"
+def ask_groq_stream(prompt):
+    client = Groq(api_key=api_key)
 
-    try:
-        client = Groq(api_key=api_key)
+    stream = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        stream=True
+    )
 
-        res = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-
-        return res.choices[0].message.content
-
-    except Exception as e:
-        return f"⚠️ Error: {str(e)}"
+    response = ""
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            response += chunk.choices[0].delta.content
+            yield response
 
 # ---------------- PDF ----------------
 def extract_text(file):
-    try:
-        reader = PdfReader(file)
-        return " ".join([p.extract_text() or "" for p in reader.pages])
-    except:
-        return ""
+    reader = PdfReader(file)
+    return " ".join([p.extract_text() or "" for p in reader.pages])
 
 def chunk_text(text, size=200):
     words = text.split()
     return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
 
 # ---------------- FILE ----------------
-files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
+files = st.file_uploader("📄 Upload PDFs", type="pdf", accept_multiple_files=True)
 
-if files and "index" not in st.session_state:
-    with st.spinner("⚡ Processing..."):
+if files:
+    with st.spinner("Processing PDFs..."):
         chunks = []
         for f in files:
             chunks.extend(chunk_text(extract_text(f)))
@@ -173,46 +104,51 @@ if files and "index" not in st.session_state:
         st.session_state.index = index
         st.session_state.chunks = chunks
 
-    st.success("✅ Documents ready")
-
-# ---------------- INPUT ----------------
-col1, col2, col3 = st.columns([6,1,1])
-
-with col1:
-    user_input = st.text_input("", value=st.session_state.query, placeholder="Ask anything...")
-
-with col2:
-    if st.button("▶️"):
-        st.session_state.query = user_input
-        st.session_state.run = True
-
-with col3:
-    if mic_enabled:
-        mic_recorder(start_prompt="🎙", stop_prompt="Stop")
+    st.success("Documents ready")
 
 # ---------------- CHAT ----------------
 chat = st.session_state.chats[st.session_state.current_chat]
 
-if st.session_state.run:
+for msg in chat:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    query = st.session_state.query
+# ---------------- INPUT ----------------
+col1, col2 = st.columns([10,1])
 
-    with st.spinner("🤖 Thinking..."):
+with col1:
+    user_input = st.text_input(
+        "",
+        value=st.session_state.input_text,
+        placeholder="Ask anything...",
+        key="input_box"
+    )
 
-        if "index" in st.session_state:
-            q_vec = model.encode([query])
-            D, I = st.session_state.index.search(np.array(q_vec), k=5)
-            context = "\n\n".join([st.session_state.chunks[i] for i in I[0]])
-        else:
-            context = "No documents provided."
+with col2:
+    send = st.button("➤")
 
-        style = {
-            "Concise": "Be brief.",
-            "Detailed": "Explain clearly.",
-            "Bullet": "Use bullet points."
-        }[mode]
+# ---------------- SAFE SEND ----------------
+def run_query(prompt):
+    chat.append({"role": "user", "content": prompt})
 
-        prompt = f"""
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # context
+    if st.session_state.index:
+        q_vec = model.encode([prompt])
+        D, I = st.session_state.index.search(np.array(q_vec), k=5)
+        context = "\n\n".join([st.session_state.chunks[i] for i in I[0]])
+    else:
+        context = "General knowledge."
+
+    style = {
+        "Concise": "Be brief.",
+        "Detailed": "Explain clearly.",
+        "Bullet": "Use bullet points."
+    }[mode]
+
+    final_prompt = f"""
 You are a smart AI assistant.
 
 {style}
@@ -221,18 +157,27 @@ Context:
 {context}
 
 Question:
-{query}
+{prompt}
 """
 
-        full = ask_groq(prompt)
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        full = ""
 
-    chat.append({"q": query, "a": full})
+        for chunk in ask_groq_stream(final_prompt):
+            full = chunk
+            placeholder.markdown(full + "▌")
 
-    st.session_state.run = False
-    st.session_state.query = ""
+        placeholder.markdown(full)
+
+    chat.append({"role": "assistant", "content": full})
+
+# prevent double trigger
+if send and user_input.strip() and not st.session_state.processing:
+    st.session_state.processing = True
+
+    run_query(user_input.strip())
+
+    st.session_state.input_text = ""
+    st.session_state.processing = False
     st.rerun()
-
-# ---------------- DISPLAY ----------------
-for item in reversed(chat):
-    st.markdown(f"<div class='user-msg'>{item['q']}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='bot-msg'>{item['a']}</div>", unsafe_allow_html=True)
