@@ -1,7 +1,10 @@
 streamlit
+streamlit-mic-recorder
+torch
+torchvision
 sentence-transformers
-scikit-learn
-PyPDF2
-openai
-numpy
 faiss-cpu
+PyPDF2
+numpy
+requests
+groq

@@ -1,286 +1,238 @@
 import os
+import uuid
 import streamlit as st
 import numpy as np
 from PyPDF2 import PdfReader
 from sentence_transformers import SentenceTransformer
 import faiss
-from openai import OpenAI
+from groq import Groq
 
-# ---------------- CONFIG ----------------
+# ---------------- MIC SAFE ----------------
+try:
+    from streamlit_mic_recorder import mic_recorder
+    mic_enabled = True
+except:
+    mic_enabled = False
+
 st.set_page_config(page_title="NeuroVault AI", layout="wide")
 
-# ---------------- PREMIUM UI ----------------
-st.markdown("""
+# ---------------- SESSION ----------------
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())[:8]
+
+if "chats" not in st.session_state:
+    st.session_state.chats = {"New Chat": []}
+
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = "New Chat"
+
+if "run" not in st.session_state:
+    st.session_state.run = False
+
+if "query" not in st.session_state:
+    st.session_state.query = ""
+
+# ---------------- THEME ----------------
+dark = st.sidebar.toggle("🌗 Dark mode", value=True)
+
+bg = "#020617" if dark else "#f8fafc"
+text = "#e2e8f0" if dark else "#111"
+bot_bg = "rgba(30,41,59,0.9)" if dark else "#ffffff"
+user_bg = "#2563eb" if dark else "#3b82f6"
+
+# THEME REFRESH
+if "prev_theme" not in st.session_state:
+    st.session_state.prev_theme = dark
+
+if st.session_state.prev_theme != dark:
+    st.session_state.prev_theme = dark
+    st.rerun()
+
+# ---------------- SIDEBAR ----------------
+st.sidebar.markdown("### 💬 Conversations")
+
+if st.sidebar.button("🔄 Refresh App"):
+    st.rerun()
+
+if st.sidebar.button("🧹 Clear Chat"):
+    st.session_state.chats[st.session_state.current_chat] = []
+    st.rerun()
+
+for name in st.session_state.chats:
+    if st.sidebar.button(name):
+        st.session_state.current_chat = name
+
+if st.sidebar.button("➕ New Chat"):
+    new = f"Chat {len(st.session_state.chats)+1}"
+    st.session_state.chats[new] = []
+    st.session_state.current_chat = new
+
+# 🔑 GROQ KEY
+api_key = st.sidebar.text_input("🔑 Groq API Key", type="password")
+
+mode = st.sidebar.selectbox("Answer style", ["Concise", "Detailed", "Bullet"])
+
+# ---------------- UI ----------------
+st.markdown(f"""
 <style>
-
-/* -------- GLOBAL -------- */
-html, body {
-    background: radial-gradient(circle at 20% 0%, #0f172a, #020617);
-    color: #e2e8f0;
-    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.block-container {
-    max-width: 1100px;
-    margin: auto;
-    padding-top: 2rem;
-}
-
-/* -------- SIDEBAR -------- */
-section[data-testid="stSidebar"] {
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(25px);
-    border-right: 1px solid rgba(255,255,255,0.05);
-}
-
-/* -------- HEADER -------- */
-.brand {
+[data-testid="stAppViewContainer"] {{
+    background-color: {bg} !important;
+    color: {text} !important;
+}}
+[data-testid="stSidebar"] {{
+    background-color: {"#020617" if dark else "#ffffff"} !important;
+}}
+.title {{
+    font-size: 56px;
+    font-weight: 900;
     text-align: center;
-    margin-bottom: 25px;
-}
-
-.brand h1 {
-    font-size: 54px;
-    font-weight: 800;
-    letter-spacing: -1px;
-    background: linear-gradient(90deg, #38bdf8, #6366f1);
+    background: linear-gradient(90deg,#38bdf8,#6366f1,#a855f7);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-}
-
-.brand p {
-    color: #94a3b8;
-    font-size: 15px;
-}
-
-/* -------- BADGE -------- */
-.badge {
+}}
+.creator {{
     text-align: center;
-    margin-bottom: 20px;
-}
-
-/* -------- MAIN CARD -------- */
-.card {
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(25px);
-    border-radius: 22px;
-    padding: 28px;
-    border: 1px solid rgba(255,255,255,0.06);
-    box-shadow:
-        0 10px 40px rgba(0,0,0,0.8),
-        inset 0 1px 0 rgba(255,255,255,0.04);
-}
-
-/* -------- UPLOADER -------- */
-[data-testid="stFileUploader"] {
-    border: 1px dashed rgba(255,255,255,0.15);
-    border-radius: 18px;
-    padding: 18px;
-    background: rgba(255,255,255,0.02);
-}
-
-/* -------- INPUT -------- */
-.stTextInput input {
-    border-radius: 999px;
-    padding: 16px;
-    font-size: 15px;
-    background: rgba(15,23,42,0.7);
-    border: 1px solid rgba(255,255,255,0.08);
-    transition: 0.3s;
-}
-
-.stTextInput input:focus {
-    border: 1px solid #6366f1;
-    box-shadow: 0 0 15px rgba(99,102,241,0.4);
-}
-
-/* -------- BUTTON -------- */
-button[kind="primary"] {
-    border-radius: 999px !important;
-    background: linear-gradient(135deg, #6366f1, #2563eb);
-    border: none;
-    font-weight: 600;
-    box-shadow: 0 4px 20px rgba(99,102,241,0.4);
-}
-
-/* -------- CHAT -------- */
-.user-msg {
-    background: linear-gradient(135deg, #2563eb, #1e40af);
-    padding: 14px 18px;
-    border-radius: 18px;
-    margin: 12px 0;
+    letter-spacing: 4px;
+    background: linear-gradient(90deg,#22d3ee,#a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}}
+.user-msg {{
+    background: {user_bg};
+    padding: 14px;
+    border-radius: 16px;
     text-align: right;
-    box-shadow: 0 6px 20px rgba(37,99,235,0.3);
-}
-
-.bot-msg {
-    background: rgba(30, 41, 59, 0.7);
-    padding: 16px 20px;
-    border-radius: 18px;
-    margin: 12px 0;
-    border: 1px solid rgba(255,255,255,0.05);
-}
-
-/* -------- FOOTER -------- */
-.footer {
-    text-align: center;
-    margin-top: 50px;
-    color: #64748b;
-    font-size: 13px;
-}
-
+    margin: 10px 0;
+    color: white;
+}}
+.bot-msg {{
+    background: {bot_bg};
+    padding: 16px;
+    border-radius: 16px;
+    margin: 10px 0;
+}}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
 st.markdown("""
-<div class='brand'>
-    <h1>🧠 NeuroVault AI</h1>
-    <p>Private AI workspace for deep document intelligence</p>
-</div>
+<div class='title'>NeuroVault AI</div>
+<div class='creator'>✦ ANISHA CHOWDHURY ✦</div>
 """, unsafe_allow_html=True)
-
-st.markdown("""
-<div class='badge'>
-    <span style='padding:6px 14px; border-radius:999px;
-    background:rgba(99,102,241,0.2); color:#a5b4fc; font-size:12px;'>
-    ⚡ AI + Vector Search Engine
-    </span>
-</div>
-""", unsafe_allow_html=True)
-
-# ---------------- SIDEBAR ----------------
-st.sidebar.markdown("## 🚀 Workspace")
-
-api_key = st.sidebar.text_input("🔑 OpenAI API Key", type="password")
-
-mode = st.sidebar.selectbox(
-    "🧾 Answer Style",
-    ["Concise", "Detailed", "Bullet points"]
-)
-
-if st.sidebar.button("🧹 Clear Chat"):
-    st.session_state.history = []
-
-if st.sidebar.button("♻️ Reset Documents"):
-    st.session_state.clear()
-    st.rerun()
-
-client = OpenAI(api_key=api_key) if api_key else None
 
 # ---------------- MODEL ----------------
 @st.cache_resource
 def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 model = load_model()
 
-# ---------------- HELPERS ----------------
+# ---------------- GROQ ----------------
+def ask_groq(prompt):
+    if not api_key:
+        return "⚠️ Enter Groq API Key in sidebar"
+
+    try:
+        client = Groq(api_key=api_key)
+
+        res = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+
+        return res.choices[0].message.content
+
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
+
+# ---------------- PDF ----------------
 def extract_text(file):
-    reader = PdfReader(file)
-    text = ""
-    for p in reader.pages:
-        t = p.extract_text()
-        if t:
-            text += t
-    return text
+    try:
+        reader = PdfReader(file)
+        return " ".join([p.extract_text() or "" for p in reader.pages])
+    except:
+        return ""
 
 def chunk_text(text, size=200):
     words = text.split()
     return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
 
-# ---------------- MAIN CARD ----------------
-st.markdown("<div class='card'>", unsafe_allow_html=True)
-
-# Upload
-files = st.file_uploader("📄 Upload PDFs", type="pdf", accept_multiple_files=True)
+# ---------------- FILE ----------------
+files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
 
 if files and "index" not in st.session_state:
-    with st.spinner("⚡ Processing documents..."):
-        chunks, sources = [], []
-
+    with st.spinner("⚡ Processing..."):
+        chunks = []
         for f in files:
-            text = extract_text(f)
-            ch = chunk_text(text)
-            chunks.extend(ch)
-            sources.extend([f.name]*len(ch))
+            chunks.extend(chunk_text(extract_text(f)))
 
         emb = model.encode(chunks)
-
         index = faiss.IndexFlatL2(emb.shape[1])
         index.add(np.array(emb))
 
         st.session_state.index = index
         st.session_state.chunks = chunks
-        st.session_state.sources = sources
 
     st.success("✅ Documents ready")
 
-# Chat input
-query = st.text_input("", placeholder="Ask anything about your documents...")
+# ---------------- INPUT ----------------
+col1, col2, col3 = st.columns([6,1,1])
 
-# Chat logic
-if "history" not in st.session_state:
-    st.session_state.history = []
+with col1:
+    user_input = st.text_input("", value=st.session_state.query, placeholder="Ask anything...")
 
-if query and "index" in st.session_state:
-    q_vec = model.encode([query])
-    D, I = st.session_state.index.search(np.array(q_vec), k=3)
+with col2:
+    if st.button("▶️"):
+        st.session_state.query = user_input
+        st.session_state.run = True
 
-    ctx_chunks = [st.session_state.chunks[i] for i in I[0]]
-    context = "\n\n".join(ctx_chunks)
-    src = list(set([st.session_state.sources[i] for i in I[0]]))
+with col3:
+    if mic_enabled:
+        mic_recorder(start_prompt="🎙", stop_prompt="Stop")
 
-    style_prompt = {
-        "Concise": "Answer briefly.",
-        "Detailed": "Give a detailed explanation.",
-        "Bullet points": "Answer in bullet points."
-    }[mode]
+# ---------------- CHAT ----------------
+chat = st.session_state.chats[st.session_state.current_chat]
 
-    answer = ""
+if st.session_state.run:
 
-    if client:
-        with st.spinner("🤖 Thinking..."):
-            stream = client.chat.completions.create(
-                model="gpt-4o-mini",
-                stream=True,
-                messages=[
-                    {"role":"system","content":f"Use ONLY context. {style_prompt}"},
-                    {"role":"user","content":f"{context}\n\nQ:{query}"}
-                ]
-            )
-            placeholder = st.empty()
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    answer += chunk.choices[0].delta.content
-                    placeholder.markdown(answer)
-    else:
-        answer = context
+    query = st.session_state.query
 
-    st.session_state.history.append({
-        "q": query,
-        "a": answer,
-        "src": src,
-        "ctx": ctx_chunks
-    })
+    with st.spinner("🤖 Thinking..."):
 
-# Display chat
-for item in reversed(st.session_state.history):
+        if "index" in st.session_state:
+            q_vec = model.encode([query])
+            D, I = st.session_state.index.search(np.array(q_vec), k=5)
+            context = "\n\n".join([st.session_state.chunks[i] for i in I[0]])
+        else:
+            context = "No documents provided."
+
+        style = {
+            "Concise": "Be brief.",
+            "Detailed": "Explain clearly.",
+            "Bullet": "Use bullet points."
+        }[mode]
+
+        prompt = f"""
+You are a smart AI assistant.
+
+{style}
+
+Context:
+{context}
+
+Question:
+{query}
+"""
+
+        full = ask_groq(prompt)
+
+    chat.append({"q": query, "a": full})
+
+    st.session_state.run = False
+    st.session_state.query = ""
+    st.rerun()
+
+# ---------------- DISPLAY ----------------
+for item in reversed(chat):
     st.markdown(f"<div class='user-msg'>{item['q']}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='bot-msg'>{item['a']}</div>", unsafe_allow_html=True)
-
-    with st.expander("🔎 Sources"):
-        for txt in item["ctx"]:
-            st.write(txt[:500] + "...")
-        st.caption("📄 " + ", ".join(item["src"]))
-
-    st.download_button("⬇️ Download Answer", item["a"], file_name="answer.txt")
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ---------------- FOOTER ----------------
-st.markdown("""
-<div class='footer'>
-NeuroVault AI • Crafted by <b>Anisha Chowdhury</b>
-</div>
-""", unsafe_allow_html=True)
