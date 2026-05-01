@@ -9,7 +9,13 @@ from groq import Groq
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="NeuroVault AI", layout="wide")
-api_key = st.secrets["GROQ_API_KEY"]
+
+# SAFE KEY LOAD
+try:
+    api_key = st.secrets["GROQ_API_KEY"]
+except:
+    st.error("⚠️ Missing GROQ_API_KEY in Streamlit Secrets")
+    st.stop()
 
 # ---------------- SESSION ----------------
 if "chats" not in st.session_state:
@@ -21,9 +27,6 @@ if "current_chat" not in st.session_state:
 if "index" not in st.session_state:
     st.session_state.index = None
     st.session_state.chunks = []
-
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
 
 if "processing" not in st.session_state:
     st.session_state.processing = False
@@ -89,7 +92,7 @@ def chunk_text(text, size=200):
     return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
 
 # ---------------- FILE ----------------
-files = st.file_uploader("📄 Upload PDFs", type="pdf", accept_multiple_files=True)
+files = st.file_uploader("📄 Upload PDFs (optional)", type="pdf", accept_multiple_files=True)
 
 if files:
     with st.spinner("Processing PDFs..."):
@@ -104,7 +107,7 @@ if files:
         st.session_state.index = index
         st.session_state.chunks = chunks
 
-    st.success("Documents ready")
+    st.success("✅ Documents ready")
 
 # ---------------- CHAT ----------------
 chat = st.session_state.chats[st.session_state.current_chat]
@@ -113,28 +116,13 @@ for msg in chat:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# ---------------- INPUT ----------------
-col1, col2 = st.columns([10,1])
-
-with col1:
-    user_input = st.text_input(
-        "",
-        value=st.session_state.input_text,
-        placeholder="Ask anything...",
-        key="input_box"
-    )
-
-with col2:
-    send = st.button("➤")
-
-# ---------------- SAFE SEND ----------------
+# ---------------- QUERY FUNCTION ----------------
 def run_query(prompt):
     chat.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # context
     if st.session_state.index:
         q_vec = model.encode([prompt])
         D, I = st.session_state.index.search(np.array(q_vec), k=5)
@@ -172,12 +160,13 @@ Question:
 
     chat.append({"role": "assistant", "content": full})
 
-# prevent double trigger
-if send and user_input.strip() and not st.session_state.processing:
+# ---------------- INPUT (CHATGPT STYLE) ----------------
+user_input = st.chat_input("Ask anything...")
+
+if user_input and not st.session_state.processing:
     st.session_state.processing = True
 
     run_query(user_input.strip())
 
-    st.session_state.input_text = ""
     st.session_state.processing = False
     st.rerun()
